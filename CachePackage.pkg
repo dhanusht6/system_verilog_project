@@ -1,0 +1,40 @@
+package CachePackage;
+
+parameter DATABUSWIDTH=32;  
+parameter ADDRESSWIDTH=32;
+parameter TAGBITS=14;   				         //no.of bits used to reperesnt tag
+parameter BLOCKBYTES=4;						 //no.of bytes per block
+parameter ASSOCIATIVITY=4; 				         //no.of ways per set
+parameter WAYREPBITS= $clog2(ASSOCIATIVITY);			 //no.of bits per block used to represent LRU strategy
+parameter BYTESELECTBITS=$clog2(BLOCKBYTES);
+parameter INDEXBITS= ADDRESSWIDTH-(TAGBITS+BYTESELECTBITS);  	 //no.of bits used as index
+parameter SETS=	2**INDEXBITS;					 //total no.of sets in the cache
+
+
+
+typedef enum logic [1:0] {EXCLUSIVE, SHAREDCLEAN, SHAREDMODIFIED, DIRTY} BLOCKSTATE;
+
+
+//Address
+typedef struct packed{
+			    logic [INDEXBITS-1:0]	INDEX;
+			    logic [TAGBITS-1:0]		TAG; 
+			    logic [BYTESELECTBITS-1:0] 	BYTESELECT;
+			}ADDRESS;
+
+//BLOCK of the CACHE
+typedef struct packed {
+			    bit      [TAGBITS-1:0] 			TAG;
+			    BLOCKSTATE 	    		        	STATE;
+			    bit      [BLOCKBYTES-1:0] [7:0] 		DATA;
+			    bit						VALIDBIT;
+			}BLOCK;
+
+//SET of the CACHE
+typedef struct packed {
+			BLOCK [ASSOCIATIVITY:1] 			BLOCKS;
+			bit [ASSOCIATIVITY:1][WAYREPBITS:0] 		LRUREG;
+			} SET;
+ 
+endpackage
+
