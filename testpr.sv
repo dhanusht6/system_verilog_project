@@ -7,11 +7,10 @@ ADDRESS address;
 logic [DATABUSWIDTH-1:0] DataIn,DataOut;
 logic READ;
 logic WRITE;
-logic BusRd;
-logic BusUpd;
-logic Shared;
+SnoopSignals Snoop;
+BroadcastSignals Broadcast;
 
-	modport CACHE(output address,READ,WRITE,BusRd ,BusUpd,Shared,DataOut, input DataIn);
+	modport CACHE(output address,READ,WRITE,Broadcast,DataOut, input DataIn,Snoop);
 	modport MEM(input address,READ,WRITE,DataOut, output DataIn);
 
 endinterface
@@ -43,7 +42,7 @@ enum bit [2:0] {RESET,IDLE,Evict,ReadfromMem, SendtoProc, WritetoCache} State, N
 logic PrWr,PrWrMiss;
 logic PrRd,PrRdMiss;
 BLOCK LRUblock;
-logic [WAYREPBITS:0] HitWay, EvictWay;
+logic [WAYREPBITS:0] HitWay, EvictWay, UpdateWay;
 
 //================================= Sequential Block ====================================
 always_ff @(posedge clock)
@@ -60,22 +59,44 @@ begin
 unique case(State)
 		RESET:
 			begin
-			//$display("Entered reset");
 			for(int i=SETS-1; i>=0; i=i-1)
 				for(int j=ASSOCIATIVITY;j>0;j=j-1)
 					CACHEMEM[i].BLOCKS[j].VALIDBIT=0;
-			//$display("CACHEMEM['0].BLOCKS[14'd2].VALIDBIT=%d",CACHEMEM[0].BLOCKS[2].VALIDBIT);
+			PrWr=0;
+			PrWrMiss=0;
+			PrRd=0;
+			PrRdMiss=0;
+			intrfcip.HIT=0;
+			intrfcip.MISS=0;
+			intrfcip.STALL=0;
 			NextState=IDLE;
 			end
-		IDLE: if(intrfcip.READ || intrfcip.WRITE)
+		IDLE: 	begin
+			if(intrfcop.Snoop.BusUpd)
 			begin
+			foreach(CACHEMEM[intrfcop.Snoop.address.INDEX].BLOCKS[i])
+				begin
+				if(CACHEMEM[intrfcop.Snoop.address.INDEX].BLOCKS[i].VALIDBIT==1 && CACHEMEM[intrfcop.Snoop.address.INDEX].BLOCKS[i].TAG==intrfcip.address.TAG)
+					begin
+				 	CACHEMEM[intrfcop.Snoop.address.INDEX].BLOCKS[i].DATA=intrfcop.Snoop.Data;
+					UpdateWay=i;
+					end
+				end
+			DragonUpdate;
+			end
+
+			if(intrfcip.READ || intrfcip.WRITE)
+			begin
+			automatic bit hitfound=0;
 			foreach(CACHEMEM[intrfcip.address.INDEX].BLOCKS[i])
-			begin:Checking
+			begin
 				 if(CACHEMEM[intrfcip.address.INDEX].BLOCKS[i].VALIDBIT==1 && CACHEMEM[intrfcip.address.INDEX].BLOCKS[i].TAG==intrfcip.address.TAG)
+					begin
+					if(hitfound==0)
 					begin
 					intrfcip.MISS=0;
 					intrfcip.HIT=1;
-					intrfcip.STALL=0;
+					intrfcip.STALL=1;
 					if(intrfcip.READ)
 						begin
 						PrRd=1;
@@ -87,9 +108,11 @@ unique case(State)
 						NextState=WritetoCache;
 						end
 					HitWay=i;
-					disable Checking;
+					hitfound=1;
+					end 
 					end
 				else 
+					if(hitfound==0)
 					begin
 					intrfcip.MISS=1;
 					intrfcip.HIT=0;
@@ -105,6 +128,7 @@ unique case(State)
 						NextState=Evict;
 						end
 					end
+			end
 			end
 			end
 
@@ -127,18 +151,18 @@ unique case(State)
 					end
 			if(CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].STATE==DIRTY || CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].STATE==SHAREDMODIFIED)
 				begin
-				intrfcop.DataOut=CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].DATA;
 				intrfcop.WRITE=1;
+				intrfcop.DataOut=CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].DATA;
 				end
+			intrfcop.READ=1;
+			intrfcop.address=intrfcip.address;
 			NextState=ReadfromMem;
 			end
 
 		ReadfromMem:
 			begin
 			DragonUpdate;
-			intrfcop.READ=1;
 			CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].DATA=intrfcop.DataIn;
-			$display("CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].DATA=%h",CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].DATA);
 			CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].TAG=intrfcip.address.TAG;
 			CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].VALIDBIT=1;
 			unique if(PrRdMiss)
@@ -151,7 +175,7 @@ unique case(State)
 			UpdateLRU;
 			if(PrRdMiss)
 				begin
-				intrfcip.DataOut=CACHEMEM[intrfcip.address.INDEX].BLOCKS[CACHEMEM[intrfcip.address.INDEX].LRUREG[ASSOCIATIVITY]].DATA[intrfcip.address.BYTESELECT];
+				intrfcip.DataOut=CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].DATA[intrfcip.address.BYTESELECT];
 				end
 			else if(PrRd)
 				begin
@@ -164,27 +188,30 @@ unique case(State)
 			PrRdMiss=0;
 			intrfcip.HIT=0;
 			intrfcip.MISS=0;
+			intrfcip.STALL=0;
 			NextState=IDLE;
 			end
 
 		WritetoCache:
 			begin
+			UpdateLRU;
 			unique if(PrWrMiss)
 				begin
-				CACHEMEM[intrfcip.address.INDEX].BLOCKS[CACHEMEM[intrfcip.address.INDEX].LRUREG[ASSOCIATIVITY]].DATA[intrfcip.address.BYTESELECT]=intrfcip.DataIn;
+				CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].DATA[intrfcip.address.BYTESELECT]=intrfcip.DataIn;
+				$display("data=%h",CACHEMEM[7].BLOCKS[4].DATA);
 				end
 			else if(PrWr)
 				begin
 				CACHEMEM[intrfcip.address.INDEX].BLOCKS[HitWay].DATA[intrfcip.address.BYTESELECT]=intrfcip.DataIn;
 				DragonUpdate;
 				end
-			UpdateLRU;
 			PrWr=0;
 			PrWrMiss=0;
 			PrRd=0;
 			PrRdMiss=0;
 			intrfcip.HIT=0;
 			intrfcip.MISS=0;
+			intrfcip.STALL=0;
 			NextState=IDLE;
 			end
 endcase
@@ -236,7 +263,12 @@ endtask
 
 //================Dragon Protocol to update the State of the Cache Blocks and maintain coherence.======================
 task automatic DragonUpdate;
-unique if(PrRd || PrWr)
+if(intrfcop.Snoop.BusUpd)
+	begin
+	if(CACHEMEM[intrfcop.Snoop.address.INDEX].BLOCKS[UpdateWay].STATE==SHAREDMODIFIED)
+		CACHEMEM[intrfcop.Snoop.address.INDEX].BLOCKS[UpdateWay].STATE=SHAREDCLEAN;
+	end
+else if(PrRd || PrWr)
 	begin
 	unique case(CACHEMEM[intrfcip.address.INDEX].BLOCKS[HitWay].STATE)
 		EXCLUSIVE: begin
@@ -251,8 +283,8 @@ unique if(PrRd || PrWr)
 					CACHEMEM[intrfcip.address.INDEX].BLOCKS[HitWay].STATE=SHAREDCLEAN;
 				else if(PrWr)
 					begin
-					intrfcop.BusUpd=1;
-					if(intrfcop.Shared)
+					intrfcop.Broadcast.BusUpd=1;
+					if(intrfcop.Snoop.Shared)
 						CACHEMEM[intrfcip.address.INDEX].BLOCKS[HitWay].STATE=SHAREDMODIFIED;
 					else
 						CACHEMEM[intrfcip.address.INDEX].BLOCKS[HitWay].STATE=DIRTY;
@@ -264,8 +296,8 @@ unique if(PrRd || PrWr)
 					CACHEMEM[intrfcip.address.INDEX].BLOCKS[HitWay].STATE=SHAREDMODIFIED;
 				else if(PrWr)
 					begin
-					intrfcop.BusUpd=1;
-					if(intrfcop.Shared)
+					intrfcop.Broadcast.BusUpd=1;
+					if(intrfcop.Snoop.Shared)
 						CACHEMEM[intrfcip.address.INDEX].BLOCKS[HitWay].STATE=SHAREDMODIFIED;
 					else
 						CACHEMEM[intrfcip.address.INDEX].BLOCKS[HitWay].STATE=DIRTY;
@@ -279,23 +311,22 @@ unique if(PrRd || PrWr)
 	end
 else if(PrRdMiss || PrWrMiss)
 	begin
-	intrfcop.BusRd=1;
+	intrfcop.Broadcast.BusRd=1;
 	unique if(PrRdMiss)
 		begin
-		$display("entered task");
-		if(intrfcop.Shared)
+		if(intrfcop.Snoop.Shared)
 			CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].STATE=EXCLUSIVE;
-		else if (~intrfcop.Shared)
+		else if (~intrfcop.Snoop.Shared)
 			CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].STATE=SHAREDCLEAN;
 		end
 	else if(PrWrMiss)
 		begin
-		unique if(intrfcop.Shared)
+		unique if(intrfcop.Snoop.Shared)
 			begin
 			CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].STATE=SHAREDMODIFIED;
-			intrfcop.BusUpd=1;
+			intrfcop.Broadcast.BusUpd=1;
 			end
-		else if (~intrfcop.Shared)
+		else if (~intrfcop.Snoop.Shared)
 			CACHEMEM[intrfcip.address.INDEX].BLOCKS[EvictWay].STATE=DIRTY;
 		end
 	end
