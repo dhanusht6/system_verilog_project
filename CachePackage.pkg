@@ -17,9 +17,9 @@ typedef enum logic [1:0] {EXCLUSIVE, SHAREDCLEAN, SHAREDMODIFIED, DIRTY} BLOCKST
 
 //Address
 typedef struct packed{
-			    logic [BYTESELECTBITS-1:0] 	BYTESELECT;
+			    logic [INDEXBITS-1:0]	INDEX;
 			    logic [TAGBITS-1:0]		TAG;
-			    logic [INDEXBITS-1:0]	INDEX; 
+			    logic [BYTESELECTBITS-1:0] 	BYTESELECT; 
 			}ADDRESS;
 
 //BLOCK of the CACHE
@@ -36,17 +36,5 @@ typedef struct packed {
 			bit [ASSOCIATIVITY:1][WAYREPBITS:0] 		LRUREG;
 			} SET;
  
-typedef struct packed{
-			logic Shared;
-			logic BusRd;
-			logic BusUpd;
-			} BroadcastSignals;
-typedef struct packed{
-			logic Shared;
-			logic BusRd;
-			logic BusUpd;
-			ADDRESS address;
-			logic [DATABUSWIDTH-1:0] Data;
-			} SnoopSignals;
 endpackage
 

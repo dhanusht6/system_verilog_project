@@ -1,59 +1,95 @@
-`include "CachePackage.pkg"
 `include "testpr.sv"
 import CachePackage::*;
 
 module TestBench();
 bit clock,reset;
-MainBus Bus();
-ProcAndCache PAC();
+int StallCount;
+MainBus Bus(.clock);
+ProcAndCache PAC(.clock,.reset);
 
-MEM M(Bus.MEM,clock);
-CACHE C(PAC.CACHE,clock, Bus.CACHE, reset);
-Processor P(PAC.PROC,clock);
-initial 
-begin
-clock=0;
-Bus.Snoop.Shared=1;
-forever #5ns clock=~clock;
-end
-endmodule
+CACHE C(PAC.CACHE,Bus.CACHE);
+Processor P(PAC.PROC);
 
-module MEM(MainBus.MEM Bus,input clock);
-bit [BLOCKBYTES-1:0] [7:0] memory [2**(INDEXBITS+TAGBITS-1):0];
+logic SHARED='z;
+assign Bus.Shared=SHARED;
+
 initial
 begin
-integer datafile;
-integer scanfile;
-	datafile=$fopen("MEM.txt","r");
-		for(int i=0;i<=2**(INDEXBITS+TAGBITS-1);i=i+1)
-			scanfile=$fscanf(datafile,"%h",memory[i]);
+reset=1;
+repeat (2) @(negedge clock);
+	reset=0;
 end
 
-always@(posedge clock)
+/*initial
+	begin
+	$monitor("C.CACHEMEM[4].BLOCKS[3].STATE=%p",C.CACHEMEM[4].BLOCKS[3].STATE);
+	end*/
+initial
+begin
+clock=0;
+forever #5ns clock=~clock;
+end
+always@(PAC.STALL)
+	if(PAC.STALL)
+		begin
+		StallCount=StallCount+1;
+			/*if(StallCount==41)
+				begin
+				Bus.Snoop.address={8'd5,6'd1,2'd00};
+				Bus.Snoop.Data=32'habcdef12;
+				Bus.Snoop.BusUpd=1;
+				@(posedge clock) Bus.Snoop.BusUpd=0;
+				end*/
+		end
+		
+always @(posedge Bus.BusRd)
+	if(StallCount==5 || StallCount==6 || StallCount==7 || StallCount==8 || StallCount==21 || StallCount==22 || StallCount==23 || StallCount==24)
+		begin
+		SHARED=1;
+		@(negedge Bus.BusRd) SHARED='z;
+		end
+
+		
+	
+endmodule
+
+/*module MEM(MainBus.MEM Bus);
+
+
+
+always@(posedge Bus.clock)
 begin
 if(Bus.READ)
 	Bus.DataIn=memory[{Bus.address.INDEX,Bus.address.TAG}];
 else if(Bus.WRITE)
 	memory[{Bus.address.INDEX,Bus.address.TAG}]=Bus.DataOut;
 end
-endmodule
+endmodule*/
 
-module Processor(ProcAndCache.PROC PB,input clock);
-integer datafile;
-integer scanfile;
-bit [25:0] captureddata;
+module Processor(ProcAndCache.PROC PB);
+bit [24:0] command [0:40];
+logic [7:0] DATA;
+assign PB.Data=DATA;
+int i=0;
+int count=0;
 initial
-	datafile=$fopen("Proc.txt","r");
-always@(posedge clock)
+	begin
+	$readmemh("Proc.txt",command);
+	end
+always@(negedge PB.clock)
 begin
-	if(PB.STALL!=1)
-	scanfile=$fscanf(datafile,"%b",captureddata);
-	PB.READ=captureddata[25];
-	PB.WRITE=captureddata[24];
-	PB.address.INDEX=captureddata[23:16];
-	PB.address.TAG=captureddata[15:10];
-	PB.address.BYTESELECT=captureddata[9:8];
-	PB.DataIn=captureddata[7:0];
+	count=count+1;
+	if(PB.STALL!=1 && count>=4)
+	begin
+	PB.READrWRITE=command[i][24];
+	PB.address.INDEX=command[i][23:16];
+	PB.address.TAG=command[i][15:10];
+	PB.address.BYTESELECT=command[i][9:8];
+	DATA=command[i][7:0];
+	i=i+1;
+	repeat (1) @(negedge PB.clock);
+		DATA='z;
+	end
 end
 endmodule
 
