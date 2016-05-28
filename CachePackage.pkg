@@ -35,18 +35,8 @@ typedef struct packed {
 			BLOCK [ASSOCIATIVITY:1] 			BLOCKS;
 			bit [ASSOCIATIVITY:1][WAYREPBITS:0] 		LRUREG;
 			} SET;
- 
-typedef struct packed{
-			logic Shared;
-			logic BusRd;
-			logic BusUpd;
-			} BroadcastSignals;
-typedef struct packed{
-			logic Shared;
-			logic BusRd;
-			logic BusUpd;
-			ADDRESS address;
-			logic [BLOCKBYTES-1:0] [7:0] Data;
-			} SnoopSignals;
+
+bit [BLOCKBYTES-1:0] [7:0] memory [2**(INDEXBITS+TAGBITS-1):0];
+
 endpackage
 
