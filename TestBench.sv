@@ -1,15 +1,29 @@
 `include "testpr.sv"
 
-module TestBench();
-bit clock,reset;
-int StallCount;
-MainBus Bus(.clock);
+module TopHDL();
+logic clock,reset;
+
+//free running clock
+//tbx clkgen
+initial
+	begin
+	clock=0;
+	forever #5ns clock=~clock;
+	end
+
+//Reset signal
+//tbx clkgen
+initial
+	begin
+	reset=1;
+	#25ns reset=0;
+	end
+CommonBus Bus(.clock);
 ProcAndCache PAC(.clock,.reset);
+Cache C(.intrfcip(PAC),.intrfcop(Bus));
+endmodule: TopHDL
 
-CACHE C(PAC.CACHE,Bus.CACHE);
-Processor P(PAC.PROC);
-
-logic SHARED='z;
+/*logic SHARED;
 logic [ADDRESSWIDTH-1:0] ADDRESS='z;
 logic [DATABUSWIDTH-1:0] DATA='z;
 logic BusUPD='z;
@@ -29,27 +43,22 @@ end
 
 initial
 	begin
-	$monitor("C.CACHEMEM[2].BLOCKS[3].STATE=%p",C.CACHEMEM[5].BLOCKS[3].STATE);
+	$monitor("C.CACHEMEM[2].BLOCKS[3].STATE=%p  at %t",C.CACHEMEM[5].BLOCKS[1].STATE,$time);
 	end
 
-//tbx clkgen
-initial
-	begin
-	clock=0;
-	forever #5ns clock=~clock;
-	end
+
 
 always@(PAC.STALL)
 	if(PAC.STALL)
 		begin
 		StallCount=StallCount+1;
-			if(StallCount==41)
-				begin
+			//if(StallCount==41)
+				//begin
 				//Bus.Address={8'd5,6'd1,2'd00};
-				ADDRESS=16'b0000010100000100; DATA=32'habcdef12; BusUPD=1;
-				end
-		end	
-always @(posedge clock) if(StallCount==41) begin  ADDRESS='z; DATA='z; BusUPD='z; end
+				//ADDRESS=16'b0000010100000100; DATA=32'habcdef12; BusUPD=1;
+				//end
+		end	*/
+//always @(posedge clock) if(StallCount==41) begin  ADDRESS='z; DATA='z; BusUPD='z; end
 			/*if(StallCount==42)
 				begin
 				ADDRESS=16'b0000010000000000;
@@ -58,12 +67,13 @@ always @(posedge clock) if(StallCount==41) begin  ADDRESS='z; DATA='z; BusUPD='z
 				BusRD='z;
 				end*/
 		
-always @(posedge Bus.BusRd)
-	if(StallCount==5 || StallCount==6 || StallCount==7 || StallCount==8 || StallCount==21 || StallCount==22 || StallCount==23 || StallCount==24)
-		SHARED=1;
-always @(negedge Bus.BusRd) 
-	if(StallCount==5 || StallCount==6 || StallCount==7 || StallCount==8 || StallCount==21 || StallCount==22 || StallCount==23 || StallCount==24)
-		SHARED='z;
+/*always @(negedge clock)
+	begin
+	if((StallCount==5 || StallCount==6 || StallCount==7 || StallCount==8 || StallCount==21 || StallCount==22 || StallCount==23 || StallCount==24) && Bus.BusRd)
+		SHARED<=1; 
+	else 
+		SHARED<='z;
+	end*/
 
 //`ifdef debug
 /*property RESET;
@@ -73,9 +83,9 @@ always @(negedge Bus.BusRd)
 					C.CACHEMEM[i].LRUREG='0;
 					end)
 endproperty
-//`endif	*/	
+//`endif	
+*/	
 	
-endmodule
 
 /*module MEM(MainBus.MEM Bus);
 
@@ -90,7 +100,7 @@ else if(Bus.WRITE)
 end
 endmodule*/
 
-module Processor(ProcAndCache.PROC PB);
+/*module Processor(ProcAndCache.PROC PB);
 bit [24:0] command [0:40];
 logic [7:0] DATA;
 assign PB.Data=DATA;
@@ -115,5 +125,5 @@ begin
 		DATA='z;
 	end
 end
-endmodule
+endmodule*/
 
